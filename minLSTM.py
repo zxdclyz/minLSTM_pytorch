@@ -33,9 +33,10 @@ class minLSTM(Module):
     Args:
         input_size (int): Dimension of input features.
         expansion_factor (float, optional): Factor to expand hidden size. Defaults to 1.0.
+        reduce_to_input (bool, optional): Whether to reduce the output to the input size. Defaults to True.
     """
 
-    def __init__(self, input_size: int, expansion_factor: float = 1.0) -> None:
+    def __init__(self, input_size: int, expansion_factor: float = 1.0, reduce_to_input: bool = True) -> None:
         super().__init__()
         hidden_size = int(input_size * expansion_factor)
 
@@ -43,7 +44,7 @@ class minLSTM(Module):
         self.to_hidden_and_gates = Linear(input_size, hidden_size * 3, bias=False)
         self.to_out = (
             Linear(hidden_size, input_size, bias=False)
-            if expansion_factor != 1.0
+            if reduce_to_input and expansion_factor != 1.0
             else Identity()
         )
 
