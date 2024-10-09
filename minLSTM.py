@@ -7,7 +7,9 @@ from typing import Optional, Tuple, Union
 
 
 # appendix B.1
-def parallel_scan_log(log_coeffs: torch.Tensor, log_values: torch.Tensor) -> torch.Tensor:
+def parallel_scan_log(
+    log_coeffs: torch.Tensor, log_values: torch.Tensor
+) -> torch.Tensor:
     a_star = torch.cumsum(log_coeffs, dim=1)
     log_h0_plus_b_star = torch.logcumsumexp(log_values - a_star, dim=1)
     log_h = a_star + log_h0_plus_b_star
@@ -25,22 +27,45 @@ def log_g(x: torch.Tensor) -> torch.Tensor:
 
 # log-space version, appendix B.3.2
 class minLSTM(Module):
+    """
+    Numerically stable minLSTM implementation in log-space.
+
+    Args:
+        input_size (int): Dimension of input features.
+        expansion_factor (float, optional): Factor to expand hidden size. Defaults to 1.0.
+    """
+
     def __init__(self, input_size: int, expansion_factor: float = 1.0) -> None:
         super().__init__()
         hidden_size = int(input_size * expansion_factor)
-        
-        # hidden and all gates
+
+        # Hidden state and gates
         self.to_hidden_and_gates = Linear(input_size, hidden_size * 3, bias=False)
-        self.to_out = Linear(hidden_size, input_size, bias=False) if expansion_factor != 1.0 else Identity()
+        self.to_out = (
+            Linear(hidden_size, input_size, bias=False)
+            if expansion_factor != 1.0
+            else Identity()
+        )
 
     def forward(
         self,
         x: torch.Tensor,
         prev_hidden: Optional[torch.Tensor] = None,
-        return_next_prev_hidden: bool = False
+        return_next_prev_hidden: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        # x: (batch_size, seq_len, input_size)
-        # prev_hidden: (batch_size, 1, hidden_size)
+        """
+        Forward pass supporting parallel and sequential modes.
+
+        Depending on the sequence length (`seq_len`), the model operates in parallel mode when `seq_len > 1` and in sequential mode when `seq_len = 1`.
+
+        Args:
+            x: Input tensor of shape (batch_size, seq_len, input_size).
+            prev_hidden: Previous hidden state, shape (batch_size, 1, hidden_size). Defaults to None.
+            return_next_prev_hidden: Whether to return the next hidden state. Defaults to False.
+
+        Returns:
+            Output tensor and optionally the next hidden state.
+        """
         seq_len = x.size(1)
         f_gate, i_gate, hidden = self.to_hidden_and_gates(x).chunk(3, dim=-1)
 
@@ -64,7 +89,7 @@ class minLSTM(Module):
             log_i = -F.softplus(-diff)
             log_h_0 = log_g(prev_hidden) if prev_hidden is not None else None
             log_tilde_h = log_g(hidden)
-            
+
             if log_h_0 is not None:
                 log_values = torch.cat([log_h_0, log_i + log_tilde_h], dim=1)
                 log_coeffs = F.pad(log_f, (0, 0, 1, 0))
@@ -74,7 +99,7 @@ class minLSTM(Module):
 
             h_t = parallel_scan_log(log_coeffs, log_values)
             out = h_t[:, -seq_len:]
-        
+
         next_prev_hidden = out[:, -1:] if seq_len > 1 else out
 
         out = self.to_out(out)
